@@ -1,58 +1,31 @@
 #!/usr/bin/env python3
 """
-Basic test script to scrape the title from a Reddit post using scrapling.
+Dynamic Reddit post scraper using scrapling.
+Works with any Reddit post URL by using intelligent selectors.
 """
 
 from scrapling.fetchers import StealthyFetcher
 
-# Reddit post URL
-url = "https://www.reddit.com/r/Chub_AI/comments/1ukyg08/any_alternative_sites_similar_to_chub/"
+# Reddit post URL (can be any Reddit post)
+url = "https://www.reddit.com/r/AIChatReviews/comments/1uhfpa3/comment/ouqq6jx/"
 
 print(f"Fetching Reddit post: {url}")
 print("=" * 80)
 
 try:
     # Use StealthyFetcher to bypass anti-bot measures
-    # Reddit has anti-bot protection, so we use StealthyFetcher
     page = StealthyFetcher.fetch(url, headless=True)
     
     print("✓ Page fetched successfully!\n")
     
-    # Method 1: Extract title from the <title> tag (easiest and most reliable)
+    # Extract title
     title_from_tag = page.css('title::text').get()
-    print("POST TITLE (from <title> tag):")
+    print("POST TITLE:")
     print(f"  {title_from_tag}")
     print()
     
-    # Method 2: Try to find the post title in the page content
-    # Reddit's new design uses specific selectors
-    print("Searching for title in page content...")
-    
-    # Try different selectors for Reddit's post title
-    title_selectors = [
-        'h1',  # Generic h1 tag
-        '[data-testid="post-container"] h1',  # Reddit's data-testid
-        '.title',  # Old Reddit class
-        'shreddit-post h1',  # New Reddit component
-    ]
-    
-    for selector in title_selectors:
-        try:
-            element = page.css(selector)
-            if element:
-                # Get the first matching element's text
-                text = element.getall()
-                if text and any('V4 Flash' in str(t) or 'unbelievable' in str(t) for t in text):
-                    print(f"  ✓ Found with selector '{selector}':")
-                    for t in text:
-                        if 'V4 Flash' in str(t) or 'unbelievable' in str(t):
-                            print(f"    {t}")
-                    break
-        except Exception as e:
-            pass
-    
-    # Method 3: Extract post content/body
-    print("\nPOST CONTENT:")
+    # Extract post content/body
+    print("POST CONTENT:")
     print("-" * 80)
     
     # Check if this is a crosspost first
@@ -77,162 +50,119 @@ try:
         try:
             original_page = StealthyFetcher.fetch(original_post_url, headless=True)
             print(f"  ✓ Fetched original post\n")
-            
-            # Try to extract body from original post
-            body_selectors = [
-                '[data-testid="post-content"]',
-                'shreddit-post [slot="text-body"]',
-                '.usertext-body',
-                '[data-click-id="text"]',
-                '.md',
-                'shreddit-post .md',
-            ]
-            
-            for selector in body_selectors:
-                try:
-                    elements = original_page.css(selector)
-                    if elements:
-                        if selector == '.md':
-                            for elem in elements:
-                                text = elem.get_all_text().strip()
-                                if 'Bought opencode' in text or '174M Tokens' in text or '$0.001' in text:
-                                    post_body = text
-                                    break
-                        else:
-                            post_body = elements.get_all_text().strip()
-                        
-                        if post_body and len(post_body) > 50:
-                            print(f"✓ Found with selector: {selector}")
-                            print(post_body[:500] + "..." if len(post_body) > 500 else post_body)
-                            break
-                except Exception as e:
-                    pass
+            page_to_use = original_page
         except Exception as e:
             print(f"  ✗ Could not fetch original post: {e}")
+            page_to_use = page
+    else:
+        page_to_use = page
     
-    # If not a crosspost or crosspost fetch failed, try current page
+    # Dynamic body extraction strategy
+    body_selectors = [
+        'shreddit-post [slot="text-body"]',
+        '[data-testid="post-content"]',
+        '.usertext-body',
+        '[data-click-id="text"]',
+    ]
+    
+    for selector in body_selectors:
+        try:
+            elements = page_to_use.css(selector)
+            if elements:
+                post_body = elements.get_all_text().strip()
+                if post_body and len(post_body) > 50:
+                    print(f"✓ Found with selector: {selector}")
+                    print(post_body[:500] + "..." if len(post_body) > 500 else post_body)
+                    break
+        except Exception as e:
+            pass
+    
+    # Fallback: Use .md selector with smart selection
     if not post_body:
-        body_selectors = [
-            '[data-testid="post-content"]',
-            'shreddit-post [slot="text-body"]',
-            '.usertext-body',
-            '[data-click-id="text"]',
-            '.md',
-            'shreddit-post .md',
-        ]
-        
-        for selector in body_selectors:
-            try:
-                elements = page.css(selector)
-                if elements:
-                    if selector == '.md':
-                        for elem in elements:
+        try:
+            md_elements = page_to_use.css('.md')
+            if md_elements:
+                # Find the shreddit-post and get its .md children
+                shreddit_posts = page_to_use.css('shreddit-post')
+                if shreddit_posts:
+                    post_md_elements = shreddit_posts[0].css('.md')
+                    if post_md_elements:
+                        # Get the .md element with the most text (likely the post body)
+                        best_elem = None
+                        max_length = 0
+                        for elem in post_md_elements:
                             text = elem.get_all_text().strip()
-                            if 'Bought opencode' in text or '174M Tokens' in text or '$0.001' in text:
-                                post_body = text
-                                break
-                    else:
-                        post_body = elements.get_all_text().strip()
-                    
-                    if post_body and len(post_body) > 50:
-                        print(f"✓ Found with selector: {selector}")
-                        print(post_body[:500] + "..." if len(post_body) > 500 else post_body)
-                        break
-            except Exception as e:
-                pass
+                            if len(text) > max_length and len(text) > 50:
+                                max_length = len(text)
+                                best_elem = elem
+                        if best_elem:
+                            post_body = best_elem.get_all_text().strip()
+                            print(f"✓ Found with selector: shreddit-post .md")
+                            print(post_body[:500] + "..." if len(post_body) > 500 else post_body)
+        except Exception as e:
+            pass
     
     if not post_body:
         print("  Could not extract post body")
     
-    # Method 4: Extract metadata (subreddit, date, username)
+    # Extract metadata
     print("\n" + "-" * 80)
     print("POST METADATA:")
     print("-" * 80)
     
-    # Try to find subreddit name
-    subreddit_selectors = [
-        'a[href*="/r/"]',
-        '[data-testid="subreddit-name"]',
-        '.subreddit-name',
-    ]
-    
+    # Subreddit
     subreddit = None
-    for selector in subreddit_selectors:
-        try:
-            elements = page.css(selector)
-            if elements:
-                for elem in elements:
-                    text = elem.get_all_text().strip()
-                    if text.startswith('r/'):
-                        subreddit = text
-                        print(f"✓ Subreddit: {subreddit}")
-                        break
-                if subreddit:
+    try:
+        elements = page.css('a[href*="/r/"]')
+        if elements:
+            for elem in elements:
+                text = elem.get_all_text().strip()
+                if text.startswith('r/') and len(text) < 30:
+                    subreddit = text
                     break
-        except Exception as e:
-            pass
+    except:
+        pass
+    print(f"✓ Subreddit: {subreddit if subreddit else 'Not found'}")
     
-    if not subreddit:
-        print("  Subreddit: Not found")
-    
-    # Try to find username/author
-    author_selectors = [
-        'a[href*="/user/"]',
-        '[data-testid="author-name"]',
-        '.author-name',
-    ]
-    
+    # Author
     author = None
-    for selector in author_selectors:
-        try:
-            elements = page.css(selector)
-            if elements:
-                for elem in elements:
-                    text = elem.get_all_text().strip()
-                    # Filter out common non-author text
-                    if text and not any(x in text.lower() for x in ['comment', 'share', 'save', 'report']):
+    try:
+        elements = page.css('a[href*="/user/"]')
+        if elements:
+            for elem in elements:
+                text = elem.get_all_text().strip()
+                if text and len(text) > 2 and len(text) < 30:
+                    if not any(x in text.lower() for x in ['comment', 'share', 'save', 'report', 'hide']):
                         author = text
-                        print(f"✓ Author: {author}")
                         break
-                if author:
-                    break
-        except Exception as e:
-            pass
+    except:
+        pass
+    print(f"✓ Author: {author if author else 'Not found'}")
     
-    if not author:
-        print("  Author: Not found")
-    
-    # Try to find post date
-    date_selectors = [
-        '[data-testid="post-timestamp"]',
-        'a[href*="/comments/"]',
-        'faceplate-timeago',
-    ]
-    
+    # Post date
     post_date = None
-    for selector in date_selectors:
-        try:
-            elements = page.css(selector)
-            if elements:
-                for elem in elements:
-                    # Check for time-related text
-                    text = elem.get_all_text().strip()
-                    if any(x in text.lower() for x in ['ago', 'day', 'hour', 'min', 'year']):
-                        post_date = text
-                        print(f"✓ Posted: {post_date}")
-                        break
-                    # Also check attributes
-                    if elem.attrib.get('title'):
-                        post_date = elem.attrib['title']
-                        print(f"✓ Posted: {post_date}")
-                        break
-                if post_date:
-                    break
-        except Exception as e:
-            pass
+    try:
+        elements = page.css('faceplate-timeago')
+        if elements:
+            post_date = elements[0].attrib.get('ts', elements[0].attrib.get('title', ''))
+            if not post_date:
+                post_date = elements[0].get_all_text().strip()
+    except:
+        pass
     
     if not post_date:
-        print("  Post date: Not found")
+        try:
+            # Try to find date in the shreddit-post attributes
+            if shreddit_post:
+                created_ts = shreddit_post[0].attrib.get('created-timestamp', '')
+                if created_ts:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(created_ts.replace('Z', '+00:00'))
+                    post_date = _time_ago(dt)
+        except:
+            pass
+    
+    print(f"✓ Posted: {post_date if post_date else 'Not found'}")
     
     print("\n" + "=" * 80)
     print("✓ SUCCESS: Reddit post data scraped successfully!")
@@ -242,3 +172,24 @@ except Exception as e:
     print(f"✗ ERROR: {type(e).__name__}: {e}")
     import traceback
     traceback.print_exc()
+
+
+def _time_ago(dt):
+    """Calculate time ago string from datetime"""
+    from datetime import datetime
+    now = datetime.now(dt.tzinfo)
+    diff = now - dt
+    
+    seconds = diff.total_seconds()
+    minutes = int(seconds / 60)
+    hours = int(minutes / 60)
+    days = int(hours / 24)
+    
+    if days > 0:
+        return f"{days}d ago"
+    elif hours > 0:
+        return f"{hours}h ago"
+    elif minutes > 0:
+        return f"{minutes}m ago"
+    else:
+        return "just now"
